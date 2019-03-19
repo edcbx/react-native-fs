@@ -19,6 +19,7 @@
 #import <CommonCrypto/CommonDigest.h>
 #import <Photos/Photos.h>
 
+#import "PhotoLibController.h"
 
 @interface RNFSManager()
 
@@ -113,21 +114,44 @@ RCT_EXPORT_METHOD(writeFile:(NSString *)filepath
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
-  NSData *data = [[NSData alloc] initWithBase64EncodedString:base64Content options:NSDataBase64DecodingIgnoreUnknownCharacters];
+  //save to iphone's photo album with ios native code
+  NSArray* pathArray = [filepath componentsSeparatedByString:@"/"];
+    NSString* fileName = [pathArray objectAtIndex:1];
+    if (fileName) {
+        NSData* imageData = [[NSData alloc] initWithBase64EncodedString:base64Content options:NSDataBase64DecodingIgnoreUnknownCharacters];
+        UIImage* image = [UIImage imageWithData:imageData];
 
-  NSMutableDictionary *attributes = [[NSMutableDictionary alloc] init];
+        [PhotoLibController setAssetCollectionWithName:fileName completion:^(NSString *errorMsg, PHAssetCollection *assetCollection) {
+            if (errorMsg) return reject(@"ios_error",errorMsg,nil);
+            
+            [PhotoLibController addAssetsToAlbumWithImageArray:[NSMutableArray arrayWithObject:image] toAssetCollection:assetCollection completion:^(NSString *errorMsg) {
+                if (errorMsg) {
+                    return reject(@"ios_error",@"add image to album failed",nil);
+                } else {
+                    return resolve(nil);
+                }
+            }];
+        }];
+    } else {
+        return reject(@"ios_error",@"filename nil",nil);
+    }
+    
+    ////// original code below //////
+  // NSData *data = [[NSData alloc] initWithBase64EncodedString:base64Content options:NSDataBase64DecodingIgnoreUnknownCharacters];
 
-  if ([options objectForKey:@"NSFileProtectionKey"]) {
-    [attributes setValue:[options objectForKey:@"NSFileProtectionKey"] forKey:@"NSFileProtectionKey"];
-  }
+  // NSMutableDictionary *attributes = [[NSMutableDictionary alloc] init];
 
-  BOOL success = [[NSFileManager defaultManager] createFileAtPath:filepath contents:data attributes:attributes];
+  // if ([options objectForKey:@"NSFileProtectionKey"]) {
+  //   [attributes setValue:[options objectForKey:@"NSFileProtectionKey"] forKey:@"NSFileProtectionKey"];
+  // }
 
-  if (!success) {
-    return reject(@"ENOENT", [NSString stringWithFormat:@"ENOENT: no such file or directory, open '%@'", filepath], nil);
-  }
+  // BOOL success = [[NSFileManager defaultManager] createFileAtPath:filepath contents:data attributes:attributes];
 
-  return resolve(nil);
+  // if (!success) {
+  //   return reject(@"ENOENT", [NSString stringWithFormat:@"ENOENT: no such file or directory, open '%@'", filepath], nil);
+  // }
+
+  // return resolve(nil);
 }
 
 RCT_EXPORT_METHOD(appendFile:(NSString *)filepath
