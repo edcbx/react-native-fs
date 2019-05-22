@@ -19,7 +19,6 @@
 #import <CommonCrypto/CommonDigest.h>
 #import <Photos/Photos.h>
 
-#import "PhotoLibController.h"
 
 @interface RNFSManager()
 
@@ -121,10 +120,10 @@ RCT_EXPORT_METHOD(writeFile:(NSString *)filepath
         NSData* imageData = [[NSData alloc] initWithBase64EncodedString:base64Content options:NSDataBase64DecodingIgnoreUnknownCharacters];
         UIImage* image = [UIImage imageWithData:imageData];
 
-        [PhotoLibController setAssetCollectionWithName:fileName completion:^(NSString *errorMsg, PHAssetCollection *assetCollection) {
+        [self setAssetCollectionWithName:fileName completion:^(NSString *errorMsg, PHAssetCollection *assetCollection) {
             if (errorMsg) return reject(@"ios_error",errorMsg,nil);
             
-            [PhotoLibController addAssetsToAlbumWithImageArray:[NSMutableArray arrayWithObject:image] toAssetCollection:assetCollection completion:^(NSString *errorMsg) {
+            [self addAssetsToAlbumWithImageArray:[NSMutableArray arrayWithObject:image] toAssetCollection:assetCollection completion:^(NSString *errorMsg) {
                 if (errorMsg) {
                     return reject(@"ios_error",@"add image to album failed",nil);
                 } else {
@@ -946,6 +945,122 @@ RCT_EXPORT_METHOD(touch:(NSString*)filepath
 {
     if (!completionHandlers) completionHandlers = [[NSMutableDictionary alloc] init];
     [completionHandlers setValue:completionHandler forKey:identifier];
+}
+
+#pragma mark - Photo Action
+- (void)setAssetCollectionWithName:(NSString*)name completion:(void(^)(NSString* errorMsg, PHAssetCollection* assetCollection))completion
+{
+    [self requestPhotoAlbumPermissions:^(BOOL permission) {
+        
+        if (permission) {
+            PHAssetCollection* assetCollection = [self getAssetCollectionWithName:name];
+            if (assetCollection) {
+                completion(nil,assetCollection);
+            } else {
+                [self createAssetCollectionWithName:name completion:^(NSString *errorMsg) {
+                    if (errorMsg) {
+                        completion(errorMsg, nil);
+                    } else {
+                        completion(nil, [self getAssetCollectionWithName:name]);
+                    }
+                }];
+            }
+        } else {
+            completion(@"Error: PHAuthorizationStatusDenied",nil);
+        }
+    }];
+}
+- (void)addAssetsToAlbumWithImageArray:(NSMutableArray*)imageArray toAssetCollection:(PHAssetCollection*)assetCollection completion:(void(^)(NSString* errorMsg))completion
+{
+    [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
+        
+        NSMutableArray* assetsArray = [[NSMutableArray alloc] init];
+        for (UIImage* image in imageArray) {
+            
+            PHAssetChangeRequest* createAssetRequest = [PHAssetChangeRequest creationRequestForAssetFromImage:image];
+            PHObjectPlaceholder* assetPlaceholder = [createAssetRequest placeholderForCreatedAsset];
+            
+            [assetsArray addObject:assetPlaceholder];
+        }
+        
+        PHAssetCollectionChangeRequest* collectionChangeRequest = [PHAssetCollectionChangeRequest changeRequestForAssetCollection:assetCollection];
+        
+        [collectionChangeRequest addAssets:assetsArray];
+        
+    } completionHandler:^(BOOL success, NSError *error) {
+        
+        if (success) {
+            completion(nil);
+        } else {
+            completion(error.localizedDescription);
+        }
+    }];
+}
+
+- (void)requestPhotoAlbumPermissions:(void(^)(BOOL permission))block
+{
+    PHAuthorizationStatus status = [PHPhotoLibrary authorizationStatus];
+    
+    switch (status)
+    {
+        case PHAuthorizationStatusAuthorized:
+            block(YES);
+            break;
+        case PHAuthorizationStatusNotDetermined:
+        {
+            [PHPhotoLibrary requestAuthorization:^(PHAuthorizationStatus authorizationStatus)
+             {
+                 if (authorizationStatus == PHAuthorizationStatusAuthorized) {
+                     block(YES);
+                 } else {
+                     block(NO);
+                 }
+             }];
+            break;
+        }
+        default:
+            block(NO);
+            break;
+    }
+}
+
+- (void)createAssetCollectionWithName:(NSString*)name completion:(void(^)(NSString* errorMsg))completion
+{
+    if ([name length] != 0) {
+        [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
+            
+            [PHAssetCollectionChangeRequest creationRequestForAssetCollectionWithTitle:name];
+            
+        } completionHandler:^(BOOL success, NSError *error) {
+            if (success) {
+                completion(nil);
+            } else {
+                completion(error.localizedDescription);
+            }
+        }];
+    } else {
+        completion(@"Error: create asset collection with empty name.");
+    }
+}
+
+- (PHAssetCollection*)getAssetCollectionWithName:(NSString*)name
+{
+    __block PHAssetCollection* assetCollection;
+    PHFetchResult* assetCollections = [PHAssetCollection fetchAssetCollectionsWithType:PHAssetCollectionTypeAlbum
+                                                                               subtype:PHAssetCollectionSubtypeAlbumRegular
+                                                                               options:nil];
+    [assetCollections enumerateObjectsUsingBlock:^(PHAssetCollection *collection, NSUInteger idx, BOOL *stop) {
+        if ([collection.localizedTitle isEqualToString:name]) {
+            assetCollection = collection;
+            *stop = YES;
+        }
+    }];
+    
+    if (assetCollection) {
+        return assetCollection;
+    } else {
+        return nil;
+    }
 }
 
 @end
